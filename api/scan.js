@@ -1,7 +1,9 @@
 const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
 const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
 const CHAT_ID = '8997807966';
-const PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD']; // Added Gold back!
+
+// Swapped out Forex for the heavy hitters: Gold and Silver
+const PAIRS = ['XAU/USD', 'XAG/USD']; 
 
 function calculateRSI(prices) {
     if (prices.length < 15) return 50;
@@ -42,9 +44,8 @@ module.exports = async (req, res) => {
 
             if (data.status === 'error') continue;
 
-            let candles = data.values.reverse(); // Oldest to newest
+            let candles = data.values.reverse(); 
             
-            // Extract prices
             let closingPrices = candles.map(c => parseFloat(c.close));
             let highs = candles.map(c => parseFloat(c.high));
             let lows = candles.map(c => parseFloat(c.low));
@@ -52,16 +53,18 @@ module.exports = async (req, res) => {
             let rsi = calculateRSI(closingPrices);
             let currentPrice = closingPrices[closingPrices.length - 1];
             
-            let decimals = pair.includes('JPY') ? 3 : (pair.includes('XAU') ? 2 : 5);
-
-            // Find Swing High/Low over the last 10 candles to set SL/TP
+            // Set proper decimals and buffers for Metals
+            let decimals = pair.includes('XAU') ? 2 : 3; // Gold 2 decimals, Silver 3
+            let buffer = pair.includes('XAU') ? 1.50 : 0.10; // $1.50 buffer for Gold, $0.10 for Silver
+            
+            // Find Swing High/Low over the last 10 candles
             let recentHigh = Math.max(...highs.slice(-10));
             let recentLow = Math.min(...lows.slice(-10));
 
             if (rsi < 30) {
                 // BUY LOGIC
                 let entry = currentPrice;
-                let sl = recentLow - (0.0002 * (pair.includes('JPY') ? 100 : 1)); // Slight buffer below swing low
+                let sl = recentLow - buffer; 
                 let risk = entry - sl;
                 let tp = entry + (risk * 1.5); // 1:1.5 Risk to Reward Ratio
 
@@ -69,7 +72,7 @@ module.exports = async (req, res) => {
             } else if (rsi > 70) {
                 // SELL LOGIC
                 let entry = currentPrice;
-                let sl = recentHigh + (0.0002 * (pair.includes('JPY') ? 100 : 1)); // Slight buffer above swing high
+                let sl = recentHigh + buffer; 
                 let risk = sl - entry;
                 let tp = entry - (risk * 1.5); // 1:1.5 Risk to Reward Ratio
 
@@ -82,8 +85,9 @@ module.exports = async (req, res) => {
 
     if (alerts.length > 0) {
         await sendTelegram(alerts.join('\n\n=================\n\n'));
-        res.status(200).send(`Sent ${alerts.length} trade setups to Telegram!`);
+        res.status(200).send(`Sent ${alerts.length} metal setups to Telegram!`);
     } else {
-        res.status(200).send('Scanned market. No trade setups found.');
+        res.status(200).send('Scanned Gold & Silver. No setups found.');
     }
-};
+};       
+        
