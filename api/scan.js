@@ -1,7 +1,7 @@
 const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
 const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
 const CHAT_ID = '8997807966';
-const PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD'];
+const PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD'];
 function calculateRSI(prices) {
     if (prices.length < 15) return 50;
     let gains = 0, losses = 0;
