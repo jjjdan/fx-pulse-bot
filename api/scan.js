@@ -1,7 +1,8 @@
 const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
 const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
 const CHAT_ID = '8997807966';
-const PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'USD/CHF', 'AUD/USD'];
+const PAIRS = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'XAU/USD']; // Added Gold back!
+
 function calculateRSI(prices) {
     if (prices.length < 15) return 50;
     let gains = 0, losses = 0;
@@ -33,34 +34,56 @@ async function sendTelegram(message) {
 module.exports = async (req, res) => {
     let alerts = [];
     
-    // Loop through all 5 pairs
     for (let pair of PAIRS) {
         try {
             const url = `https://api.twelvedata.com/time_series?symbol=${pair}&interval=15min&outputsize=30&apikey=${API_KEY}`;
             const response = await fetch(url);
             const data = await response.json();
 
-            if (data.status === 'error') continue; // Skip if API limit hit
+            if (data.status === 'error') continue;
 
-            let closingPrices = data.values.map(c => parseFloat(c.close)).reverse();
+            let candles = data.values.reverse(); // Oldest to newest
+            
+            // Extract prices
+            let closingPrices = candles.map(c => parseFloat(c.close));
+            let highs = candles.map(c => parseFloat(c.high));
+            let lows = candles.map(c => parseFloat(c.low));
+            
             let rsi = calculateRSI(closingPrices);
-            let price = closingPrices[closingPrices.length - 1];
+            let currentPrice = closingPrices[closingPrices.length - 1];
+            
+            let decimals = pair.includes('JPY') ? 3 : (pair.includes('XAU') ? 2 : 5);
+
+            // Find Swing High/Low over the last 10 candles to set SL/TP
+            let recentHigh = Math.max(...highs.slice(-10));
+            let recentLow = Math.min(...lows.slice(-10));
 
             if (rsi < 30) {
-                alerts.push(`🚨 <b>BUY SIGNAL</b> 🚨\nPair: ${pair}\nRSI: ${rsi.toFixed(1)} (Oversold)\nPrice: ${price.toFixed(4)}`);
+                // BUY LOGIC
+                let entry = currentPrice;
+                let sl = recentLow - (0.0002 * (pair.includes('JPY') ? 100 : 1)); // Slight buffer below swing low
+                let risk = entry - sl;
+                let tp = entry + (risk * 1.5); // 1:1.5 Risk to Reward Ratio
+
+                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
             } else if (rsi > 70) {
-                alerts.push(`🚨 <b>SELL SIGNAL</b> 🚨\nPair: ${pair}\nRSI: ${rsi.toFixed(1)} (Overbought)\nPrice: ${price.toFixed(4)}`);
+                // SELL LOGIC
+                let entry = currentPrice;
+                let sl = recentHigh + (0.0002 * (pair.includes('JPY') ? 100 : 1)); // Slight buffer above swing high
+                let risk = sl - entry;
+                let tp = entry - (risk * 1.5); // 1:1.5 Risk to Reward Ratio
+
+                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
             }
         } catch (e) {
             console.error(`Error processing ${pair}:`, e);
         }
     }
 
-    // If any signals were found, send them to Telegram
     if (alerts.length > 0) {
-        await sendTelegram(alerts.join('\n\n'));
-        res.status(200).send(`Sent ${alerts.length} signal(s) to Telegram!`);
+        await sendTelegram(alerts.join('\n\n=================\n\n'));
+        res.status(200).send(`Sent ${alerts.length} trade setups to Telegram!`);
     } else {
-        res.status(200).send('Scanned all pairs. No signals found. Market is neutral.');
+        res.status(200).send('Scanned market. No trade setups found.');
     }
 };
