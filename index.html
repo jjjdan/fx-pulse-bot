@@ -1,202 +1,82 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FX Pulse - Pro Signal Generator</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background-color: #0b0e11;
-            color: #eaecef;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
-            margin: 0;
-        }
-        .container {
-            background: #181a20;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            width: 100%;
-            max-width: 450px;
-            text-align: center;
-            box-sizing: border-box;
-        }
-        h1 { color: #f0b90b; margin-top: 0; font-size: 1.5rem; }
-        .selector {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            justify-content: center;
-            margin-bottom: 25px;
-        }
-        .pair-btn {
-            background: #2b3139;
-            color: #fff;
-            border: none;
-            padding: 8px 12px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 0.85rem;
-        }
-        .pair-btn.active { background: #f0b90b; color: #000; }
-        
-        .price-box { font-size: 2.2rem; font-weight: bold; margin-bottom: 10px; color: #fff; }
-        
-        .signal-box {
-            padding: 25px;
-            border-radius: 8px;
-            font-size: 1.8rem;
-            font-weight: bold;
-            margin: 20px 0;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .signal-buy { background: rgba(14, 203, 129, 0.2); color: #0ecb81; border: 2px solid #0ecb81; }
-        .signal-sell { background: rgba(246, 70, 93, 0.2); color: #f6465d; border: 2px solid #f6465d; }
-        .signal-neutral { background: rgba(240, 185, 11, 0.2); color: #f0b90b; border: 2px solid #f0b90b; }
-        
-        .rsi-meter { margin-top: 20px; font-size: 1rem; color: #848e9c; }
-        .rsi-value { font-weight: bold; color: #fff; font-size: 1.2rem; }
-        
-        button.refresh-btn {
-            background: transparent;
-            border: 1px solid #f0b90b;
-            color: #f0b90b;
-            padding: 12px;
-            width: 100%;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            margin-top: 25px;
-            font-size: 1rem;
-        }
-    </style>
-</head>
-<body>
+const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
+const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
+const CHAT_ID = '8997807966';
 
-<div class="container">
-    <h1>📈 FX Pulse Pro</h1>
-    
-    <div class="selector">
-        <button class="pair-btn active" onclick="changePair('EUR/USD', event)">EUR/USD</button>
-        <button class="pair-btn" onclick="changePair('GBP/USD', event)">GBP/USD</button>
-        <button class="pair-btn" onclick="changePair('USD/JPY', event)">USD/JPY</button>
-        <button class="pair-btn" onclick="changePair('USD/CHF', event)">USD/CHF</button>
-        <button class="pair-btn" onclick="changePair('AUD/USD', event)">AUD/USD</button>
-    </div>
+// Scanning Gold on the 15-minute timeframe
+const PAIRS = ['XAU/USD']; 
 
-    <div class="price-box" id="priceDisplay">Loading...</div>
-    
-    <div class="signal-box signal-neutral" id="signalDisplay">
-        Analyzing Market...
-    </div>
-    
-    <div class="rsi-meter">
-        RSI (14): <span class="rsi-value" id="rsiDisplay">--</span>
-    </div>
-
-    <button class="refresh-btn" onclick="fetchData()">Refresh Signal</button>
-</div>
-
-<script>
-    let currentPair = 'EUR/USD';
-    const apiKey = 'cf861702f9c54898a4d97b9d60739743'; // Your Twelve Data API Key
-
-    function changePair(pair, event) {
-        currentPair = pair;
-        let btns = document.querySelectorAll('.pair-btn');
-        btns.forEach(btn => btn.classList.remove('active'));
-        event.target.classList.add('active');
-        fetchData();
+function calculateRSI(prices) {
+    if (prices.length < 15) return 50;
+    let gains = 0, losses = 0;
+    for (let i = prices.length - 14; i < prices.length; i++) {
+        let change = prices[i] - prices[i - 1];
+        if (change > 0) gains += change;
+        else losses += Math.abs(change);
     }
+    let avgGain = gains / 14;
+    let avgLoss = losses / 14;
+    if (avgLoss === 0) return 100;
+    let rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+}
 
-    // Function to calculate RSI (Relative Strength Index)
-    function calculateRSI(prices) {
-        if (prices.length < 15) return 50; // Default neutral if not enough data
-        let gains = 0;
-        let losses = 0;
+async function sendTelegram(message) {
+    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+    await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            chat_id: CHAT_ID,
+            text: message,
+            parse_mode: 'HTML'
+        })
+    });
+}
 
-        // Look at the last 14 price changes
-        for (let i = prices.length - 14; i < prices.length; i++) {
-            let change = prices[i] - prices[i - 1];
-            if (change > 0) {
-                gains += change;
-            } else {
-                losses += Math.abs(change);
-            }
-        }
-
-        let avgGain = gains / 14;
-        let avgLoss = losses / 14;
-
-        if (avgLoss === 0) return 100; // Overbought
-        let rs = avgGain / avgLoss;
-        let rsi = 100 - (100 / (1 + rs));
-        
-        return rsi;
-    }
-
-    async function fetchData() {
-        const signalBox = document.getElementById('signalDisplay');
-        const priceBox = document.getElementById('priceDisplay');
-        const rsiBox = document.getElementById('rsiDisplay');
-        
-        signalBox.className = 'signal-box signal-neutral';
-        signalBox.innerText = 'Calculating RSI...';
-        priceBox.innerText = '...';
-        rsiBox.innerText = '--';
-        
+module.exports = async (req, res) => {
+    let alerts = [];
+    
+    for (let pair of PAIRS) {
         try {
-            // Fetch last 30 candles on the 15-minute timeframe from Twelve Data
-            const url = `https://api.twelvedata.com/time_series?symbol=${currentPair}&interval=15min&outputsize=30&apikey=${apiKey}`;
+            const url = `https://api.twelvedata.com/time_series?symbol=${pair}&interval=15min&outputsize=30&apikey=${API_KEY}`;
             const response = await fetch(url);
             const data = await response.json();
-            
-            // Check if API returned an error (like rate limit)
-            if (data.status === 'error') {
-                throw new Error(data.message || 'API Error. Check your API key or limits.');
-            }
 
-            // Extract closing prices. Twelve Data returns newest first, so we reverse it.
-            let closingPrices = data.values.map(candle => parseFloat(candle.close)).reverse();
+            if (data.status === 'error') continue;
+
+            let candles = data.values.reverse(); 
+            
+            let closingPrices = candles.map(c => parseFloat(c.close));
+            let rsi = calculateRSI(closingPrices);
             let currentPrice = closingPrices[closingPrices.length - 1];
             
-            // Calculate RSI
-            let rsi = calculateRSI(closingPrices);
-            
-            // Format price (JPY pairs have 3 decimals, others usually have 4 or 5)
-            let decimals = currentPair.includes('JPY') ? 3 : 5;
-            priceBox.innerText = currentPrice.toFixed(decimals);
-            rsiBox.innerText = rsi.toFixed(1);
-            
-            // Generate Signal based on RSI
             if (rsi < 30) {
-                signalBox.className = 'signal-box signal-buy';
-                signalBox.innerText = '▲ Buy Signal (Oversold)';
-            } else if (rsi > 70) {
-                signalBox.className = 'signal-box signal-sell';
-                signalBox.innerText = '▼ Sell Signal (Overbought)';
-            } else {
-                signalBox.className = 'signal-box signal-neutral';
-                signalBox.innerText = '● No Trade (Neutral)';
-            }
+                // BUY LOGIC
+                let entry = currentPrice;
+                let sl = entry - 7.0; // $7 distance hard SL
+                let tp1_be = entry + 2.0; // Move SL to breakeven here
+                let tp2_phase = entry + 5.0; // Switch to $2 trail steps here
 
-        } catch (error) {
-            signalBox.className = 'signal-box signal-sell';
-            signalBox.innerText = 'Error';
-            priceBox.innerText = 'N/A';
-            console.error("Error:", error);
+                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(2)}\n🛑 Hard SL: ${sl.toFixed(2)}\n\n🔁 <b>Trade Management Plan</b>\n1️⃣ Price hits ${tp1_be.toFixed(2)} -> Move SL to Entry (Breakeven)\n2️⃣ Price hits ${tp2_phase.toFixed(2)} -> Switch to $2 trail steps\n3️⃣ Every $1 price moves up -> Trail SL up by $1\n\n⏱ Timeframe: 15m`);
+                
+            } else if (rsi > 70) {
+                // SELL LOGIC
+                let entry = currentPrice;
+                let sl = entry + 7.0; // $7 distance hard SL
+                let tp1_be = entry - 2.0; // Move SL to breakeven here
+                let tp2_phase = entry - 5.0; // Switch to $2 trail steps here
+
+                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(2)}\n🛑 Hard SL: ${sl.toFixed(2)}\n\n🔁 <b>Trade Management Plan</b>\n1️⃣ Price hits ${tp1_be.toFixed(2)} -> Move SL to Entry (Breakeven)\n2️⃣ Price hits ${tp2_phase.toFixed(2)} -> Switch to $2 trail steps\n3️⃣ Every $1 price moves down -> Trail SL down by $1\n\n⏱ Timeframe: 15m`);
+            }
+        } catch (e) {
+            console.error(`Error processing ${pair}:`, e);
         }
     }
 
-    // Fetch on load
-    fetchData();
-</script>
-
-</body>
-  </html>
+    if (alerts.length > 0) {
+        await sendTelegram(alerts.join('\n\n=================\n\n'));
+        res.status(200).send(`Sent trade management plan to Telegram!`);
+    } else {
+        res.status(200).send('Scanned Gold. No setups found.');
+    }
+};
