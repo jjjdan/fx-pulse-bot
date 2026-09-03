@@ -2,7 +2,6 @@ const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
 const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
 const CHAT_ID = '8997807966';
 
-// Swapped out Forex for the heavy hitters: Gold and Silver
 const PAIRS = ['XAU/USD', 'XAG/USD']; 
 
 function calculateRSI(prices) {
@@ -53,11 +52,9 @@ module.exports = async (req, res) => {
             let rsi = calculateRSI(closingPrices);
             let currentPrice = closingPrices[closingPrices.length - 1];
             
-            // Set proper decimals and buffers for Metals
-            let decimals = pair.includes('XAU') ? 2 : 3; // Gold 2 decimals, Silver 3
-            let buffer = pair.includes('XAU') ? 1.50 : 0.10; // $1.50 buffer for Gold, $0.10 for Silver
+            let decimals = pair.includes('XAU') ? 2 : 3; 
+            let buffer = pair.includes('XAU') ? 1.50 : 0.10; 
             
-            // Find Swing High/Low over the last 10 candles
             let recentHigh = Math.max(...highs.slice(-10));
             let recentLow = Math.min(...lows.slice(-10));
 
@@ -66,17 +63,24 @@ module.exports = async (req, res) => {
                 let entry = currentPrice;
                 let sl = recentLow - buffer; 
                 let risk = entry - sl;
-                let tp = entry + (risk * 1.5); // 1:1.5 Risk to Reward Ratio
+                
+                // Two Take Profits
+                let tp1 = entry + (risk * 1.0); // 1:1 RR
+                let tp2 = entry + (risk * 2.0); // 1:2 RR
 
-                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
+                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 TP 1: ${tp1.toFixed(decimals)} (Close 0.02 lots & move SL to Entry)\n🎯 TP 2: ${tp2.toFixed(decimals)} (Let 0.03 lots run)\n\n⏱ Timeframe: 15m`);
+                
             } else if (rsi > 70) {
                 // SELL LOGIC
                 let entry = currentPrice;
                 let sl = recentHigh + buffer; 
                 let risk = sl - entry;
-                let tp = entry - (risk * 1.5); // 1:1.5 Risk to Reward Ratio
+                
+                // Two Take Profits
+                let tp1 = entry - (risk * 1.0); // 1:1 RR
+                let tp2 = entry - (risk * 2.0); // 1:2 RR
 
-                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
+                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 TP 1: ${tp1.toFixed(decimals)} (Close 0.02 lots & move SL to Entry)\n🎯 TP 2: ${tp2.toFixed(decimals)} (Let 0.03 lots run)\n\n⏱ Timeframe: 15m`);
             }
         } catch (e) {
             console.error(`Error processing ${pair}:`, e);
@@ -85,9 +89,8 @@ module.exports = async (req, res) => {
 
     if (alerts.length > 0) {
         await sendTelegram(alerts.join('\n\n=================\n\n'));
-        res.status(200).send(`Sent ${alerts.length} metal setups to Telegram!`);
+        res.status(200).send(`Sent metal setups to Telegram!`);
     } else {
         res.status(200).send('Scanned Gold & Silver. No setups found.');
     }
-};       
-        
+};
