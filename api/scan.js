@@ -19,6 +19,21 @@ function calculateRSI(prices) {
     return 100 - (100 / (1 + rs));
 }
 
+// NEW: Calculate ATR to measure live volatility
+function calculateATR(candles, period = 14) {
+    if (candles.length < period + 1) return 2.0; // Fallback
+    let trueRanges = [];
+    for (let i = candles.length - period; i < candles.length; i++) {
+        let high = parseFloat(candles[i].high);
+        let low = parseFloat(candles[i].low);
+        let prevClose = parseFloat(candles[i-1].close);
+        let tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+        trueRanges.push(tr);
+    }
+    let sum = trueRanges.reduce((a, b) => a + b, 0);
+    return sum / period;
+}
+
 async function sendTelegram(message) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
     await fetch(url, {
@@ -52,6 +67,9 @@ module.exports = async (req, res) => {
             let rsi = calculateRSI(closingPrices);
             let currentPrice = closingPrices[closingPrices.length - 1];
             
+            // Calculate ATR
+            let atr = calculateATR(candles);
+            
             let decimals = pair.includes('XAU') ? 2 : 3; 
             let buffer = pair.includes('XAU') ? 1.50 : 0.10; 
             
@@ -62,25 +80,21 @@ module.exports = async (req, res) => {
                 // BUY LOGIC
                 let entry = currentPrice;
                 let sl = recentLow - buffer; 
-                let risk = entry - sl;
                 
-                // Two Take Profits
-                let tp1 = entry + (risk * 1.0); // 1:1 RR
-                let tp2 = entry + (risk * 2.0); // 1:2 RR
+                // DYNAMIC TP: 1.5x ATR (Adapts to market speed)
+                let tp = entry + (atr * 1.5);
 
-                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 TP 1: ${tp1.toFixed(decimals)} (Close 0.02 lots & move SL to Entry)\n🎯 TP 2: ${tp2.toFixed(decimals)} (Let 0.03 lots run)\n\n⏱ Timeframe: 15m`);
+                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n📈 Volatility (ATR): ${atr.toFixed(2)}\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
                 
             } else if (rsi > 70) {
                 // SELL LOGIC
                 let entry = currentPrice;
                 let sl = recentHigh + buffer; 
-                let risk = sl - entry;
                 
-                // Two Take Profits
-                let tp1 = entry - (risk * 1.0); // 1:1 RR
-                let tp2 = entry - (risk * 2.0); // 1:2 RR
+                // DYNAMIC TP: 1.5x ATR (Adapts to market speed)
+                let tp = entry - (atr * 1.5);
 
-                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 TP 1: ${tp1.toFixed(decimals)} (Close 0.02 lots & move SL to Entry)\n🎯 TP 2: ${tp2.toFixed(decimals)} (Let 0.03 lots run)\n\n⏱ Timeframe: 15m`);
+                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n📈 Volatility (ATR): ${atr.toFixed(2)}\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
             }
         } catch (e) {
             console.error(`Error processing ${pair}:`, e);
@@ -89,7 +103,7 @@ module.exports = async (req, res) => {
 
     if (alerts.length > 0) {
         await sendTelegram(alerts.join('\n\n=================\n\n'));
-        res.status(200).send(`Sent metal setups to Telegram!`);
+        res.status(200).send(`Sent dynamic TP setups to Telegram!`);
     } else {
         res.status(200).send('Scanned Gold & Silver. No setups found.');
     }
