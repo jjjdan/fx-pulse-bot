@@ -1,6 +1,6 @@
 const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
 const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
-const CHAT_ID = '8997807966';
+const CHAT_ID = '-1004302935650'; 
 
 const PAIRS = ['XAU/USD', 'XAG/USD']; 
 
