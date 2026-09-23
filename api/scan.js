@@ -46,37 +46,55 @@ module.exports = async (req, res) => {
             let candles = data.values.reverse(); 
             
             let closingPrices = candles.map(c => parseFloat(c.close));
-            let highs = candles.map(c => parseFloat(c.high));
-            let lows = candles.map(c => parseFloat(c.low));
+            let currentCandle = candles[candles.length - 1];
+            let currentOpen = parseFloat(currentCandle.open);
+            let currentClose = parseFloat(currentCandle.close);
             
-            let rsi = calculateRSI(closingPrices);
-            let currentPrice = closingPrices[closingPrices.length - 1];
+            // Calculate Current RSI and Previous RSI
+            let currentRSI = calculateRSI(closingPrices);
+            let prevRSI = calculateRSI(closingPrices.slice(0, -1)); 
             
             let decimals = pair.includes('XAU') ? 2 : 3; 
-            let buffer = pair.includes('XAU') ? 1.50 : 0.10; 
-            
-            let recentHigh = Math.max(...highs.slice(-10));
-            let recentLow = Math.min(...lows.slice(-10));
-
-            // Fixed $20 Profit Distance
-            // Gold needs to move $4.00. Silver needs to move $0.08.
             let fixedTPDistance = pair.includes('XAU') ? 4.00 : 0.08;
 
-            if (rsi < 30) {
-                // BUY LOGIC
-                let entry = currentPrice;
-                let sl = recentLow - buffer; 
-                let tp = entry + fixedTPDistance; // Fixed $20 target
+            // ==========================================
+            // ENGINE 1: MOMENTUM FLUSH (Ride the Curve)
+            // ==========================================
+            
+            // SELL FLUSH: RSI breaks below 30, candle is Red (Crash momentum)
+            if (prevRSI >= 30 && currentRSI < 30 && currentClose < currentOpen) {
+                let entry = currentClose; 
+                let tp = entry - fixedTPDistance; 
 
-                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n\n⚙️ <b>Lot Size: 0.05</b> (Target: $20)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
+                alerts.push(`🔥 <b>SELL FLUSH: ${pair}</b> 🔥\n📊 RSI: ${currentRSI.toFixed(1)} (Momentum Crash)\n🕯 Trend: Bearish\n\n⚙️ <b>Lot Size: 0.05</b> (Target: $20)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⚠️ No Stop Loss (Hold until TP)\n⏱ Timeframe: 15m`);
                 
-            } else if (rsi > 70) {
-                // SELL LOGIC
-                let entry = currentPrice;
-                let sl = recentHigh + buffer; 
-                let tp = entry - fixedTPDistance; // Fixed $20 target
+            } 
+            // BUY FLUSH: RSI breaks above 70, candle is Green (Pump momentum)
+            else if (prevRSI <= 70 && currentRSI > 70 && currentClose > currentOpen) {
+                let entry = currentClose; 
+                let tp = entry + fixedTPDistance; 
 
-                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n\n⚙️ <b>Lot Size: 0.05</b> (Target: $20)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
+                alerts.push(`🔥 <b>BUY FLUSH: ${pair}</b> 🔥\n📊 RSI: ${currentRSI.toFixed(1)} (Momentum Pump)\n🕯 Trend: Bullish\n\n⚙️ <b>Lot Size: 0.05</b> (Target: $20)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⚠️ No Stop Loss (Hold until TP)\n⏱ Timeframe: 15m`);
+            }
+
+            // ==========================================
+            // ENGINE 2: EXHAUSTION HOOK (Reverse the Curve)
+            // ==========================================
+            
+            // BUY HOOK: RSI was below 35, hooks UP, candle is Green (Bottom is in)
+            else if (prevRSI <= 35 && currentRSI > prevRSI && currentClose > currentOpen) {
+                let entry = currentClose; 
+                let tp = entry + fixedTPDistance; 
+
+                alerts.push(`🚨 <b>BUY REVERSAL: ${pair}</b> 🚨\n📊 RSI Hook: ${prevRSI.toFixed(1)} ➔ ${currentRSI.toFixed(1)}\n🕯 Confirmation: Bullish Candle\n\n⚙️ <b>Lot Size: 0.05</b> (Target: $20)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⚠️ No Stop Loss (Hold until TP)\n⏱ Timeframe: 15m`);
+                
+            } 
+            // SELL HOOK: RSI was above 65, hooks DOWN, candle is Red (Top is in)
+            else if (prevRSI >= 65 && currentRSI < prevRSI && currentClose < currentOpen) {
+                let entry = currentClose; 
+                let tp = entry - fixedTPDistance; 
+
+                alerts.push(`🚨 <b>SELL REVERSAL: ${pair}</b> 🚨\n📊 RSI Hook: ${prevRSI.toFixed(1)} ➔ ${currentRSI.toFixed(1)}\n🕯 Confirmation: Bearish Candle\n\n⚙️ <b>Lot Size: 0.05</b> (Target: $20)\n\n💰 Entry: ${entry.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⚠️ No Stop Loss (Hold until TP)\n⏱ Timeframe: 15m`);
             }
         } catch (e) {
             console.error(`Error processing ${pair}:`, e);
@@ -85,7 +103,7 @@ module.exports = async (req, res) => {
 
     if (alerts.length > 0) {
         await sendTelegram(alerts.join('\n\n=================\n\n'));
-        res.status(200).send(`Sent fixed $20 TP setups to Telegram!`);
+        res.status(200).send(`Sent Momentum/Reversal setups to Telegram!`);
     } else {
         res.status(200).send('Scanned Gold & Silver. No setups found.');
     }
