@@ -89,10 +89,14 @@ module.exports = async (req, res) => {
 
             // ==========================================
             // EXHAUSTION HOOK + TREND FILTER
+            // Relaxed thresholds for EUR/USD, Strict for XAU/USD
             // ==========================================
             
+            let rsiOverboughtThreshold = pair.includes('XAU') ? 65 : 60;
+            let rsiOversoldThreshold = pair.includes('XAU') ? 35 : 40;
+            
             // BUY REVERSAL: ONLY if Uptrend (Price > 50 EMA), RSI hooks up, and Candle is Green
-            if (isUptrend && prevRSI <= 35 && currentRSI > prevRSI && currentClose > currentOpen) {
+            if (isUptrend && prevRSI <= rsiOversoldThreshold && currentRSI > prevRSI && currentClose > currentOpen) {
                 let entry = currentClose; 
                 let tp = entry + fixedTPDistance; 
 
@@ -100,7 +104,7 @@ module.exports = async (req, res) => {
                 
             } 
             // SELL REVERSAL: ONLY if Downtrend (Price < 50 EMA), RSI hooks down, and Candle is Red
-            else if (isDowntrend && prevRSI >= 65 && currentRSI < prevRSI && currentClose < currentOpen) {
+            else if (isDowntrend && prevRSI >= rsiOverboughtThreshold && currentRSI < prevRSI && currentClose < currentOpen) {
                 let entry = currentClose; 
                 let tp = entry - fixedTPDistance; 
 
