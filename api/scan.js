@@ -1,13 +1,9 @@
 const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
 const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
-const CHAT_ID = '-1004302935650';
+const CHAT_ID = '-1004302935650'; 
 
-// Gold only.
-const PAIRS = ['XAU/USD'];
+const PAIRS = ['XAU/USD', 'XAG/USD']; 
 
-// ==========================================
-// RSI CALCULATION
-// ==========================================
 function calculateRSI(prices) {
     if (prices.length < 15) return 50;
     let gains = 0, losses = 0;
@@ -23,24 +19,6 @@ function calculateRSI(prices) {
     return 100 - (100 / (1 + rs));
 }
 
-// ==========================================
-// 50 EMA CALCULATION
-// ==========================================
-function calculateEMA(prices, period = 50) {
-    if (prices.length < period) return null;
-    let k = 2 / (period + 1);
-    let sma = 0;
-    for (let i = 0; i < period; i++) sma += prices[i];
-    let ema = sma / period;
-    for (let i = period; i < prices.length; i++) {
-        ema = (prices[i] * k) + (ema * (1 - k));
-    }
-    return ema;
-}
-
-// ==========================================
-// TELEGRAM SENDER
-// ==========================================
 async function sendTelegram(message) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
     await fetch(url, {
@@ -54,87 +32,51 @@ async function sendTelegram(message) {
     });
 }
 
-// ==========================================
-// MAIN HANDLER
-// ==========================================
 module.exports = async (req, res) => {
     let alerts = [];
-
+    
     for (let pair of PAIRS) {
         try {
-            // Fetch 100 candles — enough for 50 EMA + RSI
-            const url = `https://api.twelvedata.com/time_series?symbol=${pair}&interval=15min&outputsize=100&apikey=${API_KEY}`;
+            const url = `https://api.twelvedata.com/time_series?symbol=${pair}&interval=15min&outputsize=30&apikey=${API_KEY}`;
             const response = await fetch(url);
             const data = await response.json();
 
             if (data.status === 'error') continue;
 
-            let candles = data.values.reverse(); // Oldest to newest
-
+            let candles = data.values.reverse(); 
+            
             let closingPrices = candles.map(c => parseFloat(c.close));
-
-            // Current and previous RSI
-            let currentRSI = calculateRSI(closingPrices);
-            let prevRSI = calculateRSI(closingPrices.slice(0, -1));
-
-            // Current price
+            let highs = candles.map(c => parseFloat(c.high));
+            let lows = candles.map(c => parseFloat(c.low));
+            
+            let rsi = calculateRSI(closingPrices);
             let currentPrice = closingPrices[closingPrices.length - 1];
+            
+            // Set proper decimals and buffers for Metals
+            let decimals = pair.includes('XAU') ? 2 : 3; // Gold 2 decimals, Silver 3
+            let buffer = pair.includes('XAU') ? 1.50 : 0.10; // $1.50 buffer for Gold, $0.10 for Silver
+            
+            // Find Swing High/Low over the last 10 candles
+            let recentHigh = Math.max(...highs.slice(-10));
+            let recentLow = Math.min(...lows.slice(-10));
 
-            // 50 EMA + Trend
-            let ema50 = calculateEMA(closingPrices, 50);
-            let isUptrend = currentPrice > ema50;
-            let isDowntrend = currentPrice < ema50;
-
-            // TP distance (fixed $4 move = $4 profit on 0.01 lots)
-            let fixedTPDistance = 4.00;
-            let decimals = 2;
-
-            // ==========================================
-            // BUY SIGNAL
-            // prevRSI < 30 AND currentRSI > prevRSI
-            // RSI was oversold, now ticking UP = reversal starting
-            // ==========================================
-            if (prevRSI < 30 && currentRSI > prevRSI && isUptrend) {
+            if (rsi < 30) {
+                // BUY LOGIC
                 let entry = currentPrice;
-                let tp = parseFloat((entry + fixedTPDistance).toFixed(decimals));
+                let sl = recentLow - buffer; 
+                let risk = entry - sl;
+                let tp = entry + (risk * 1.5); // 1:1.5 Risk to Reward Ratio
 
-                alerts.push(
-                    `🚨 <b>BUY REVERSAL DETECTED: ${pair}</b> 🚨\n` +
-                    `📊 RSI Hook: ${prevRSI.toFixed(1)} ➔ ${currentRSI.toFixed(1)} (Reversing UP from Oversold)\n` +
-                    `📈 Trend: UP (Price above 50 EMA: ${ema50.toFixed(decimals)})\n\n` +
-                    `⚙️ <b>Lot Size: 0.01</b>\n\n` +
-                    `📌 <b>PLACE PENDING BUY STOP ORDER:</b>\n` +
-                    `💰 Entry: ${entry.toFixed(decimals)}\n` +
-                    `🎯 Take Profit: ${tp.toFixed(decimals)}\n` +
-                    `📏 TP Distance: $${fixedTPDistance} move\n\n` +
-                    `⏱ Timeframe: 15m\n` +
-                    `⚠️ Wait for price to reach entry before order triggers`
-                );
-            }
-
-            // ==========================================
-            // SELL SIGNAL
-            // prevRSI > 70 AND currentRSI < prevRSI
-            // RSI was overbought, now ticking DOWN = reversal starting
-            // ==========================================
-            else if (prevRSI > 70 && currentRSI < prevRSI && isDowntrend) {
+                alerts.push(`🚨 <b>BUY SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Oversold)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
+            } else if (rsi > 70) {
+                // SELL LOGIC
                 let entry = currentPrice;
-                let tp = parseFloat((entry - fixedTPDistance).toFixed(decimals));
+                let sl = recentHigh + buffer; 
+                let risk = sl - entry;
+                let tp = entry - (risk * 1.5); // 1:1.5 Risk to Reward Ratio
 
-                alerts.push(
-                    `🚨 <b>SELL REVERSAL DETECTED: ${pair}</b> 🚨\n` +
-                    `📊 RSI Hook: ${prevRSI.toFixed(1)} ➔ ${currentRSI.toFixed(1)} (Reversing DOWN from Overbought)\n` +
-                    `📉 Trend: DOWN (Price below 50 EMA: ${ema50.toFixed(decimals)})\n\n` +
-                    `⚙️ <b>Lot Size: 0.01</b>\n\n` +
-                    `📌 <b>PLACE PENDING SELL STOP ORDER:</b>\n` +
-                    `💰 Entry: ${entry.toFixed(decimals)}\n` +
-                    `🎯 Take Profit: ${tp.toFixed(decimals)}\n` +
-                    `📏 TP Distance: $${fixedTPDistance} move\n\n` +
-                    `⏱ Timeframe: 15m\n` +
-                    `⚠️ Wait for price to reach entry before order triggers`
-                );
+                alerts.push(`🚨 <b>SELL SETUP: ${pair}</b> 🚨\n📊 RSI: ${rsi.toFixed(1)} (Overbought)\n\n⚙️ <b>Lot Size: 0.05</b>\n\n💰 Entry: ${entry.toFixed(decimals)}\n🛑 Stop Loss: ${sl.toFixed(decimals)}\n🎯 Take Profit: ${tp.toFixed(decimals)}\n\n⏱ Timeframe: 15m`);
             }
-
         } catch (e) {
             console.error(`Error processing ${pair}:`, e);
         }
@@ -142,8 +84,8 @@ module.exports = async (req, res) => {
 
     if (alerts.length > 0) {
         await sendTelegram(alerts.join('\n\n=================\n\n'));
-        res.status(200).send('Reversal signal sent to Telegram.');
+        res.status(200).send(`Sent metal setups to Telegram!`);
     } else {
-        res.status(200).send('Scanned Gold. No reversal hooks detected.');
+        res.status(200).send('Scanned Gold & Silver. No setups found.');
     }
 };
