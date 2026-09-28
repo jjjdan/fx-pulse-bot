@@ -97,14 +97,13 @@ function checkDivergence(closingPrices, highs, lows, direction, divLookback = 10
 
 // ==========================================
 // PAIR CONFIG
-// Based on actual trades this weekend
 // ==========================================
 function getPairConfig(pair) {
     if (pair.includes('XAU')) {
         return {
             decimals:    2,
-            touchBuffer: 0.50,   // Gold: $0.50 touch zone
-            slBuffer:    1.00,   // Gold: $1.00 beyond swing
+            touchBuffer: 0.50,
+            slBuffer:    1.00,
             lotSize:     '0.01',
             rsiOversold: 30,
             rsiOverbought: 70
@@ -113,20 +112,20 @@ function getPairConfig(pair) {
     if (pair.includes('BTC')) {
         return {
             decimals:    2,
-            touchBuffer: 50.00,  // BTC: $50 touch zone
-            slBuffer:    30.00,  // BTC: $30 beyond swing
+            touchBuffer: 50.00,
+            slBuffer:    30.00,
             lotSize:     '0.01',
-            rsiOversold: 35,     // Relaxed for BTC — hits 35 more than 30
+            rsiOversold: 35,
             rsiOverbought: 65
         };
     }
     if (pair.includes('ETH')) {
         return {
             decimals:    2,
-            touchBuffer: 5.00,   // ETH: $5 touch zone
-            slBuffer:    3.00,   // ETH: $3 beyond swing
+            touchBuffer: 5.00,
+            slBuffer:    3.00,
             lotSize:     '0.01',
-            rsiOversold: 35,     // Relaxed for ETH — hits 35 more than 30
+            rsiOversold: 35,
             rsiOverbought: 65
         };
     }
@@ -154,6 +153,7 @@ async function sendTelegram(message) {
 // ==========================================
 module.exports = async (req, res) => {
     let alerts = [];
+    let debugLines = [];
 
     for (let pair of PAIRS) {
         try {
@@ -165,11 +165,11 @@ module.exports = async (req, res) => {
             const data = await response.json();
 
             if (data.status === 'error') {
-                console.log(`[${pair}] API error: ${data.message}`);
+                debugLines.push(`❌ [${pair}] API error: ${data.message}`);
                 continue;
             }
 
-            let candles = data.values.reverse(); // oldest to newest
+            let candles = data.values.reverse();
 
             let closingPrices = candles.map(c => parseFloat(c.close));
             let highs         = candles.map(c => parseFloat(c.high));
@@ -179,15 +179,12 @@ module.exports = async (req, res) => {
             let currentHigh  = highs[highs.length - 1];
             let currentLow   = lows[lows.length - 1];
 
-            // RSI on closed candles
-            let rsi = calculateRSI(closingPrices.slice(0, -1));
+            let rsi    = calculateRSI(closingPrices.slice(0, -1));
+            let ema50  = calculateEMA(closingPrices);
 
-            // 50 EMA trend filter
-            let ema50       = calculateEMA(closingPrices);
             let isUptrend   = ema50 !== null && currentClose > ema50;
             let isDowntrend = ema50 !== null && currentClose < ema50;
 
-            // Swing high/low over last 20 candles
             let lookback    = 20;
             let recentHighs = highs.slice(-lookback - 1, -1);
             let recentLows  = lows.slice(-lookback - 1, -1);
@@ -198,6 +195,25 @@ module.exports = async (req, res) => {
 
             let priceTouchesLow  = currentLow  <= swingLow  + touchBuffer;
             let priceTouchesHigh = currentHigh >= swingHigh - touchBuffer;
+
+            // ---- DEBUG BLOCK ----
+            // Shows exactly how far each condition is from triggering
+            const rsiDistBuy  = (rsi - rsiOversold).toFixed(1);     // positive = how far above threshold (bad for buy)
+            const rsiDistSell = (rsiOverbought - rsi).toFixed(1);    // positive = how far below threshold (bad for sell)
+            const lowDist     = (currentLow - (swingLow + touchBuffer)).toFixed(decimals);   // negative = touching
+            const highDist    = ((swingHigh - touchBuffer) - currentHigh).toFixed(decimals); // negative = touching
+
+            debugLines.push(
+                `📊 <b>${pair}</b>\n` +
+                `  Price: ${currentClose.toFixed(decimals)} | EMA50: ${ema50 ? ema50.toFixed(decimals) : 'N/A'}\n` +
+                `  RSI: ${rsi.toFixed(1)} (Buy needs &lt;${rsiOversold} | Sell needs &gt;${rsiOverbought})\n` +
+                `  Trend: ${isUptrend ? '📈 UP' : isDowntrend ? '📉 DOWN' : '➡️ FLAT/NULL'}\n` +
+                `  SwingLow: ${swingLow.toFixed(decimals)} | SwingHigh: ${swingHigh.toFixed(decimals)}\n` +
+                `  Low touch gap: ${lowDist} (${parseFloat(lowDist) <= 0 ? '✅ TOUCHING' : '❌ not yet'})\n` +
+                `  High touch gap: ${highDist} (${parseFloat(highDist) <= 0 ? '✅ TOUCHING' : '❌ not yet'})\n` +
+                `  BUY needs: touch✅=${priceTouchesLow} | RSI✅=${rsi < rsiOversold} | Uptrend✅=${isUptrend}\n` +
+                `  SELL needs: touch✅=${priceTouchesHigh} | RSI✅=${rsi > rsiOverbought} | Downtrend✅=${isDowntrend}`
+            );
 
             // ==========================================
             // BUY LOGIC
@@ -225,7 +241,7 @@ module.exports = async (req, res) => {
                         `⏱ Timeframe: 15m`
                     );
                 } else {
-                    console.log(`[${pair}] BUY blocked — ${divResult.reason}`);
+                    debugLines.push(`  ⛔ BUY divergence blocked: ${divResult.reason}`);
                 }
             }
 
@@ -255,19 +271,25 @@ module.exports = async (req, res) => {
                         `⏱ Timeframe: 15m`
                     );
                 } else {
-                    console.log(`[${pair}] SELL blocked — ${divResult.reason}`);
+                    debugLines.push(`  ⛔ SELL divergence blocked: ${divResult.reason}`);
                 }
             }
 
         } catch (e) {
+            debugLines.push(`💥 [${pair}] Exception: ${e.message}`);
             console.error(`Error processing ${pair}:`, e);
         }
     }
+
+    // Always send debug snapshot to Telegram so you can see what's happening
+    const now = new Date().toUTCString();
+    const debugHeader = `🔍 <b>DEBUG SCAN — ${now}</b>\n${'─'.repeat(30)}`;
+    await sendTelegram(debugHeader + '\n\n' + debugLines.join('\n\n'));
 
     if (alerts.length > 0) {
         await sendTelegram(alerts.join('\n\n=================\n\n'));
         res.status(200).send('Sent Gold, BTC, ETH setups to Telegram!');
     } else {
-        res.status(200).send('Scanned Gold, BTC, ETH. No setups found.');
+        res.status(200).send('Scanned Gold, BTC, ETH. No setups found. Debug sent to Telegram.');
     }
 };
