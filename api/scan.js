@@ -1,11 +1,11 @@
-const API_KEY = 'cf861702f9c54898a4d97b9d60739743';
+const API_KEY      = 'cf861702f9c54898a4d97b9d60739743';
 const TELEGRAM_TOKEN = '8994198937:AAHLO80dlq-jnHiO_fsyja3aHTQoUwG7ow8';
-const CHAT_ID = '-1004302935650';
+const CHAT_ID      = '-1004302935650';
 
 const PAIRS = ['XAU/USD', 'BTC/USD', 'ETH/USD'];
 
 // ==========================================
-// RSI (14)
+// RSI (14) — simple, single pass
 // ==========================================
 function calculateRSI(prices) {
     if (prices.length < 15) return 50;
@@ -22,24 +22,7 @@ function calculateRSI(prices) {
 }
 
 // ==========================================
-// BOLLINGER BANDS (20, 2)
-// ==========================================
-function calculateBB(prices, period = 20, multiplier = 2) {
-    if (prices.length < period) return null;
-    const slice = prices.slice(-period);
-    const mean = slice.reduce((a, b) => a + b, 0) / period;
-    const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / period;
-    const stdDev = Math.sqrt(variance);
-    return {
-        upper: mean + multiplier * stdDev,
-        middle: mean,
-        lower: mean - multiplier * stdDev,
-        stdDev
-    };
-}
-
-// ==========================================
-// MACD (12, 26, 9)
+// EMA — single pass, O(n)
 // ==========================================
 function calculateEMA(prices, period) {
     if (prices.length < period) return null;
@@ -51,100 +34,32 @@ function calculateEMA(prices, period) {
     return ema;
 }
 
-function calculateMACD(prices) {
-    if (prices.length < 35) return null;
-
-    // Build EMA12 and EMA26 series for signal line calculation
-    const ema12Series = [];
-    const ema26Series = [];
-
-    for (let i = 26; i <= prices.length; i++) {
-        const slice = prices.slice(0, i);
-        const e12 = calculateEMA(slice, 12);
-        const e26 = calculateEMA(slice, 26);
-        if (e12 !== null && e26 !== null) {
-            ema12Series.push(e12);
-            ema26Series.push(e26);
-        }
-    }
-
-    const macdSeries = ema12Series.map((v, i) => v - ema26Series[i]);
-
-    if (macdSeries.length < 9) return null;
-
-    const signal = calculateEMA(macdSeries, 9);
-    const macdLine = macdSeries[macdSeries.length - 1];
-    const prevMacdLine = macdSeries[macdSeries.length - 2];
-
-    // Signal line for previous candle
-    const prevSignal = calculateEMA(macdSeries.slice(0, -1), 9);
-
-    const histogram = macdLine - signal;
-    const prevHistogram = prevMacdLine - (prevSignal || signal);
-
-    return {
-        macd: macdLine,
-        signal,
-        histogram,
-        prevMacd: prevMacdLine,
-        prevSignal: prevSignal || signal,
-        prevHistogram,
-        // Crossover: MACD crossed above signal on this candle
-        bullishCross: prevMacdLine < (prevSignal || signal) && macdLine > signal,
-        // Crossover: MACD crossed below signal on this candle
-        bearishCross: prevMacdLine > (prevSignal || signal) && macdLine < signal
-    };
-}
-
-// ==========================================
-// PIVOT S/R — looks for swing highs/lows
-// A pivot high = candle whose high is highest of surrounding N candles
-// A pivot low  = candle whose low  is lowest  of surrounding N candles
-// ==========================================
-function calculatePivots(highs, lows, strength = 5) {
-    const pivotHighs = [];
-    const pivotLows  = [];
-    const len = highs.length;
-
-    for (let i = strength; i < len - strength; i++) {
-        const windowHighs = highs.slice(i - strength, i + strength + 1);
-        const windowLows  = lows.slice(i - strength, i + strength + 1);
-
-        if (highs[i] === Math.max(...windowHighs)) {
-            pivotHighs.push(highs[i]);
-        }
-        if (lows[i] === Math.min(...windowLows)) {
-            pivotLows.push(lows[i]);
-        }
-    }
-
-    // Return the most recent 3 of each so we have layered S/R
-    return {
-        resistanceLevels: pivotHighs.slice(-3),
-        supportLevels:    pivotLows.slice(-3)
-    };
-}
-
 // ==========================================
 // PAIR CONFIG
 // ==========================================
 function getPairConfig(pair) {
-    if (pair.includes('XAU')) return { decimals: 2, lotSize: '0.01', bbBuffer: 0.30 };
-    if (pair.includes('BTC')) return { decimals: 2, lotSize: '0.01', bbBuffer: 15.00 };
-    if (pair.includes('ETH')) return { decimals: 2, lotSize: '0.01', bbBuffer: 2.00  };
+    if (pair.includes('XAU')) return { decimals: 2, lotSize: '0.01', slBuffer: 1.50 };
+    if (pair.includes('BTC')) return { decimals: 2, lotSize: '0.01', slBuffer: 80.00 };
+    if (pair.includes('ETH')) return { decimals: 2, lotSize: '0.01', slBuffer: 4.00  };
     return null;
 }
 
 // ==========================================
-// TELEGRAM
+// TELEGRAM — with error logging
 // ==========================================
 async function sendTelegram(message) {
-    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
-    await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: CHAT_ID, text: message, parse_mode: 'HTML' })
-    });
+    try {
+        const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: CHAT_ID, text: message, parse_mode: 'HTML' })
+        });
+        const json = await res.json();
+        if (!json.ok) console.error('Telegram error:', JSON.stringify(json));
+    } catch (e) {
+        console.error('Telegram fetch failed:', e.message);
+    }
 }
 
 // ==========================================
@@ -159,16 +74,16 @@ module.exports = async (req, res) => {
             const config = getPairConfig(pair);
             if (!config) continue;
 
-            const url = `https://api.twelvedata.com/time_series?symbol=${pair}&interval=15min&outputsize=100&apikey=${API_KEY}`;
+            const url = `https://api.twelvedata.com/time_series?symbol=${pair}&interval=15min&outputsize=210&apikey=${API_KEY}`;
             const response = await fetch(url);
             const data     = await response.json();
 
-            if (data.status === 'error') {
-                debugLines.push(`❌ [${pair}] API error: ${data.message}`);
+            if (data.status === 'error' || !data.values) {
+                debugLines.push(`❌ [${pair}] API error: ${data.message || 'no values returned'}`);
                 continue;
             }
 
-            const candles       = data.values.reverse();
+            const candles       = data.values.reverse(); // oldest → newest
             const closingPrices = candles.map(c => parseFloat(c.close));
             const highs         = candles.map(c => parseFloat(c.high));
             const lows          = candles.map(c => parseFloat(c.low));
@@ -177,82 +92,62 @@ module.exports = async (req, res) => {
             const currentHigh  = highs[highs.length - 1];
             const currentLow   = lows[lows.length - 1];
 
-            // Indicators (on closed candles — exclude last)
+            // Use closed candles only for indicators
             const closedPrices = closingPrices.slice(0, -1);
-            const rsi          = calculateRSI(closedPrices);
-            const bb           = calculateBB(closedPrices);
-            const macd         = calculateMACD(closedPrices);
 
-            if (!bb || !macd) {
-                debugLines.push(`⚠️ [${pair}] Not enough data for indicators`);
+            // RSI(14)
+            const rsi = calculateRSI(closedPrices);
+
+            // EMA200 — trend regime filter
+            const ema200 = calculateEMA(closedPrices, 200);
+
+            if (ema200 === null) {
+                debugLines.push(`⚠️ [${pair}] Not enough candles for EMA200 (have ${closedPrices.length}, need 200)`);
                 continue;
             }
 
-            // Pivot S/R (exclude last candle)
-            const { resistanceLevels, supportLevels } = calculatePivots(
-                highs.slice(0, -1),
-                lows.slice(0, -1),
-                5
-            );
+            const { decimals, lotSize, slBuffer } = config;
 
-            const nearestSupport    = supportLevels.length    ? Math.max(...supportLevels)    : null;
-            const nearestResistance = resistanceLevels.length ? Math.min(...resistanceLevels) : null;
+            // Trend regime
+            const isUptrend   = currentClose > ema200;
+            const isDowntrend = currentClose < ema200;
 
-            const { decimals, lotSize, bbBuffer } = config;
+            // Signal conditions
+            // BUY:  RSI < 40 (oversold) AND price above EMA200 (uptrend intact)
+            // SELL: RSI > 60 (overbought) AND price below EMA200 (downtrend intact)
+            const buySignal  = rsi < 40 && isUptrend;
+            const sellSignal = rsi > 60 && isDowntrend;
 
-            // ---- SIGNAL CONDITIONS ----
-            // BUY: price near support + near/below BB lower + MACD bullish cross + RSI < 45
-            const atSupport      = nearestSupport    !== null && currentLow  <= nearestSupport    * 1.002;
-            const nearBBLower    = currentClose      <= bb.lower + bbBuffer;
-            const rsiOversold    = rsi < 45;
-            const macdBullCross  = macd.bullishCross;
-
-            // SELL: price near resistance + near/above BB upper + MACD bearish cross + RSI > 55
-            const atResistance   = nearestResistance !== null && currentHigh >= nearestResistance * 0.998;
-            const nearBBUpper    = currentClose      >= bb.upper - bbBuffer;
-            const rsiOverbought  = rsi > 55;
-            const macdBearCross  = macd.bearishCross;
-
-            // ---- DEBUG — gap distances show how far each condition is from firing ----
-            const supportGap    = nearestSupport    ? (currentLow  - nearestSupport    * 1.002).toFixed(decimals) : 'N/A';
-            const resistGap     = nearestResistance ? (nearestResistance * 0.998 - currentHigh).toFixed(decimals) : 'N/A';
-            const bbLowerGap    = (currentClose - (bb.lower + bbBuffer)).toFixed(decimals);
-            const bbUpperGap    = ((bb.upper - bbBuffer) - currentClose).toFixed(decimals);
-            const rsiGapBuy     = (rsi - 45).toFixed(1);   // negative = already below threshold ✅
-            const rsiGapSell    = (55 - rsi).toFixed(1);   // negative = already above threshold ✅
-            const macdGap       = (macd.macd - macd.signal).toFixed(4); // negative = MACD below signal
+            // Gap distances for debug
+            const rsiGapBuy  = (rsi - 40).toFixed(1);  // negative = ✅ below threshold
+            const rsiGapSell = (60 - rsi).toFixed(1);  // negative = ✅ above threshold
+            const emaGap     = (currentClose - ema200).toFixed(decimals); // positive = above EMA
 
             debugLines.push(
                 `📊 <b>${pair}</b>\n` +
-                `  Price: ${currentClose.toFixed(decimals)}\n` +
-                `  BB → Upper: ${bb.upper.toFixed(decimals)} | Mid: ${bb.middle.toFixed(decimals)} | Lower: ${bb.lower.toFixed(decimals)}\n` +
-                `  MACD: ${macd.macd.toFixed(4)} | Signal: ${macd.signal.toFixed(4)} | Gap: ${macdGap} | Hist: ${macd.histogram.toFixed(4)}\n` +
-                `  MACD Bull Cross: ${macdBullCross ? '✅' : '❌'} | Bear Cross: ${macdBearCross ? '✅' : '❌'}\n` +
-                `  RSI: ${rsi.toFixed(1)} | Buy gap (needs <45): ${rsiGapBuy} | Sell gap (needs >55): ${rsiGapSell}\n` +
-                `  Support: ${nearestSupport ? nearestSupport.toFixed(decimals) : 'none'} | Gap to trigger: ${supportGap} (${parseFloat(supportGap) <= 0 ? '✅ AT SUPPORT' : '❌ not yet'})\n` +
-                `  Resistance: ${nearestResistance ? nearestResistance.toFixed(decimals) : 'none'} | Gap to trigger: ${resistGap} (${parseFloat(resistGap) <= 0 ? '✅ AT RESISTANCE' : '❌ not yet'})\n` +
-                `  BB Lower gap: ${bbLowerGap} (${parseFloat(bbLowerGap) <= 0 ? '✅' : '❌'}) | BB Upper gap: ${bbUpperGap} (${parseFloat(bbUpperGap) <= 0 ? '✅' : '❌'})\n` +
-                `  BUY  → support:${atSupport ? '✅' : '❌'} | bbLower:${nearBBLower ? '✅' : '❌'} | macdBull:${macdBullCross ? '✅' : '❌'} | rsi<45:${rsiOversold ? '✅' : '❌'}\n` +
-                `  SELL → resist:${atResistance ? '✅' : '❌'} | bbUpper:${nearBBUpper ? '✅' : '❌'} | macdBear:${macdBearCross ? '✅' : '❌'} | rsi>55:${rsiOverbought ? '✅' : '❌'}`
+                `  Price: ${currentClose.toFixed(decimals)} | EMA200: ${ema200.toFixed(decimals)}\n` +
+                `  Trend: ${isUptrend ? '📈 ABOVE EMA200' : isDowntrend ? '📉 BELOW EMA200' : '➡️ AT EMA200'} | Gap: ${emaGap}\n` +
+                `  RSI: ${rsi.toFixed(1)}\n` +
+                `  BUY  needs RSI<40 (gap: ${rsiGapBuy}) + above EMA200: ${buySignal ? '🟢 SIGNAL!' : '❌ not yet'}\n` +
+                `  SELL needs RSI>60 (gap: ${rsiGapSell}) + below EMA200: ${sellSignal ? '🔴 SIGNAL!' : '❌ not yet'}`
             );
 
             // ==========================================
             // BUY
             // ==========================================
-            if (atSupport && nearBBLower && macdBullCross && rsiOversold) {
+            if (buySignal) {
                 const entry = currentClose;
-                const sl    = parseFloat((nearestSupport * 0.999).toFixed(decimals));
+                const sl    = parseFloat((currentLow - slBuffer).toFixed(decimals));
                 const risk  = entry - sl;
-                const tp    = parseFloat((entry + risk * 1.5).toFixed(decimals)); // 1:1.5 RR
+                const tp    = parseFloat((entry + risk * 1.5).toFixed(decimals));
 
                 alerts.push(
                     `🚨 <b>BUY SETUP: ${pair}</b> 🚨\n` +
-                    `📊 RSI: ${rsi.toFixed(1)} | MACD bullish crossover ✅\n` +
-                    `📉 Price at Support: ${nearestSupport.toFixed(decimals)}\n` +
-                    `📊 Near BB Lower: ${bb.lower.toFixed(decimals)}\n\n` +
+                    `📊 RSI: ${rsi.toFixed(1)} — Oversold\n` +
+                    `📈 Trend: ABOVE EMA200 (${ema200.toFixed(decimals)})\n\n` +
                     `⚙️ <b>Lot Size: ${lotSize}</b>\n\n` +
-                    `💰 Entry: ${entry.toFixed(decimals)}\n` +
-                    `🛑 Stop Loss: ${sl.toFixed(decimals)}\n` +
+                    `💰 Entry:       ${entry.toFixed(decimals)}\n` +
+                    `🛑 Stop Loss:   ${sl.toFixed(decimals)}\n` +
                     `🎯 Take Profit: ${tp.toFixed(decimals)}\n` +
                     `📏 RR Ratio: 1:1.5\n\n` +
                     `⏱ Timeframe: 15m`
@@ -262,20 +157,19 @@ module.exports = async (req, res) => {
             // ==========================================
             // SELL
             // ==========================================
-            if (atResistance && nearBBUpper && macdBearCross && rsiOverbought) {
+            if (sellSignal) {
                 const entry = currentClose;
-                const sl    = parseFloat((nearestResistance * 1.001).toFixed(decimals));
+                const sl    = parseFloat((currentHigh + slBuffer).toFixed(decimals));
                 const risk  = sl - entry;
-                const tp    = parseFloat((entry - risk * 1.5).toFixed(decimals)); // 1:1.5 RR
+                const tp    = parseFloat((entry - risk * 1.5).toFixed(decimals));
 
                 alerts.push(
                     `🚨 <b>SELL SETUP: ${pair}</b> 🚨\n` +
-                    `📊 RSI: ${rsi.toFixed(1)} | MACD bearish crossover ✅\n` +
-                    `📈 Price at Resistance: ${nearestResistance.toFixed(decimals)}\n` +
-                    `📊 Near BB Upper: ${bb.upper.toFixed(decimals)}\n\n` +
+                    `📊 RSI: ${rsi.toFixed(1)} — Overbought\n` +
+                    `📉 Trend: BELOW EMA200 (${ema200.toFixed(decimals)})\n\n` +
                     `⚙️ <b>Lot Size: ${lotSize}</b>\n\n` +
-                    `💰 Entry: ${entry.toFixed(decimals)}\n` +
-                    `🛑 Stop Loss: ${sl.toFixed(decimals)}\n` +
+                    `💰 Entry:       ${entry.toFixed(decimals)}\n` +
+                    `🛑 Stop Loss:   ${sl.toFixed(decimals)}\n` +
                     `🎯 Take Profit: ${tp.toFixed(decimals)}\n` +
                     `📏 RR Ratio: 1:1.5\n\n` +
                     `⏱ Timeframe: 15m`
@@ -288,14 +182,17 @@ module.exports = async (req, res) => {
         }
     }
 
-    // Always send debug to Telegram
+    // Always send debug — even if empty
     const now = new Date().toUTCString();
-    await sendTelegram(`🔍 <b>DEBUG SCAN — ${now}</b>\n${'─'.repeat(30)}\n\n` + debugLines.join('\n\n'));
+    await sendTelegram(
+        `🔍 <b>DEBUG SCAN — ${now}</b>\n${'─'.repeat(30)}\n\n` +
+        (debugLines.length ? debugLines.join('\n\n') : '⚠️ No pairs processed')
+    );
 
     if (alerts.length > 0) {
         await sendTelegram(alerts.join('\n\n=================\n\n'));
         res.status(200).send('Signals sent to Telegram.');
     } else {
-        res.status(200).send('No setups found. Debug sent to Telegram.');
+        res.status(200).send('No setups. Debug sent to Telegram.');
     }
 };
