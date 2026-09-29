@@ -213,17 +213,27 @@ module.exports = async (req, res) => {
             const rsiOverbought  = rsi > 55;
             const macdBearCross  = macd.bearishCross;
 
-            // ---- DEBUG ----
+            // ---- DEBUG — gap distances show how far each condition is from firing ----
+            const supportGap    = nearestSupport    ? (currentLow  - nearestSupport    * 1.002).toFixed(decimals) : 'N/A';
+            const resistGap     = nearestResistance ? (nearestResistance * 0.998 - currentHigh).toFixed(decimals) : 'N/A';
+            const bbLowerGap    = (currentClose - (bb.lower + bbBuffer)).toFixed(decimals);
+            const bbUpperGap    = ((bb.upper - bbBuffer) - currentClose).toFixed(decimals);
+            const rsiGapBuy     = (rsi - 45).toFixed(1);   // negative = already below threshold ✅
+            const rsiGapSell    = (55 - rsi).toFixed(1);   // negative = already above threshold ✅
+            const macdGap       = (macd.macd - macd.signal).toFixed(4); // negative = MACD below signal
+
             debugLines.push(
                 `📊 <b>${pair}</b>\n` +
                 `  Price: ${currentClose.toFixed(decimals)}\n` +
                 `  BB → Upper: ${bb.upper.toFixed(decimals)} | Mid: ${bb.middle.toFixed(decimals)} | Lower: ${bb.lower.toFixed(decimals)}\n` +
-                `  MACD: ${macd.macd.toFixed(4)} | Signal: ${macd.signal.toFixed(4)} | Hist: ${macd.histogram.toFixed(4)}\n` +
-                `  MACD Bull Cross: ${macdBullCross} | Bear Cross: ${macdBearCross}\n` +
-                `  RSI: ${rsi.toFixed(1)}\n` +
-                `  Nearest Support: ${nearestSupport ? nearestSupport.toFixed(decimals) : 'none'} | Resistance: ${nearestResistance ? nearestResistance.toFixed(decimals) : 'none'}\n` +
-                `  — BUY  → atSupport:${atSupport} | nearBBLower:${nearBBLower} | macdBull:${macdBullCross} | RSI<45:${rsiOversold}\n` +
-                `  — SELL → atResist:${atResistance} | nearBBUpper:${nearBBUpper} | macdBear:${macdBearCross} | RSI>55:${rsiOverbought}`
+                `  MACD: ${macd.macd.toFixed(4)} | Signal: ${macd.signal.toFixed(4)} | Gap: ${macdGap} | Hist: ${macd.histogram.toFixed(4)}\n` +
+                `  MACD Bull Cross: ${macdBullCross ? '✅' : '❌'} | Bear Cross: ${macdBearCross ? '✅' : '❌'}\n` +
+                `  RSI: ${rsi.toFixed(1)} | Buy gap (needs <45): ${rsiGapBuy} | Sell gap (needs >55): ${rsiGapSell}\n` +
+                `  Support: ${nearestSupport ? nearestSupport.toFixed(decimals) : 'none'} | Gap to trigger: ${supportGap} (${parseFloat(supportGap) <= 0 ? '✅ AT SUPPORT' : '❌ not yet'})\n` +
+                `  Resistance: ${nearestResistance ? nearestResistance.toFixed(decimals) : 'none'} | Gap to trigger: ${resistGap} (${parseFloat(resistGap) <= 0 ? '✅ AT RESISTANCE' : '❌ not yet'})\n` +
+                `  BB Lower gap: ${bbLowerGap} (${parseFloat(bbLowerGap) <= 0 ? '✅' : '❌'}) | BB Upper gap: ${bbUpperGap} (${parseFloat(bbUpperGap) <= 0 ? '✅' : '❌'})\n` +
+                `  BUY  → support:${atSupport ? '✅' : '❌'} | bbLower:${nearBBLower ? '✅' : '❌'} | macdBull:${macdBullCross ? '✅' : '❌'} | rsi<45:${rsiOversold ? '✅' : '❌'}\n` +
+                `  SELL → resist:${atResistance ? '✅' : '❌'} | bbUpper:${nearBBUpper ? '✅' : '❌'} | macdBear:${macdBearCross ? '✅' : '❌'} | rsi>55:${rsiOverbought ? '✅' : '❌'}`
             );
 
             // ==========================================
